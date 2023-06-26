@@ -31,7 +31,7 @@ func (b *Book) Trade() {
 	heap.Init(sellOrders)
 
 	for order := range b.OrdersChan {
-		switch order.Type {
+		switch order.OrderType {
 		case "BUY":
 			buyOrders.Push(order)
 			for sellOrders.Len() > 0 && sellOrders.Orders[0].Price <= order.Price {
@@ -79,18 +79,13 @@ func (b *Book) AddTransaction(transaction *Transaction, wg *sync.WaitGroup) {
 	}
 
 	transaction.SellingOrder.Investor.UpdateAssetPosition(transaction.SellingOrder.Asset.ID, -minShares)
-	transaction.SellingOrder.PendingShares -= minShares
+	transaction.AddSellOrderPendingShares(-minShares)
 
 	transaction.BuyingOrder.Investor.UpdateAssetPosition(transaction.BuyingOrder.Asset.ID, minShares)
-	transaction.BuyingOrder.PendingShares -= minShares
+	transaction.AddBuyOrderPendingShares(-minShares)
 
-	transaction.Total = float64(transaction.Shares) * transaction.BuyingOrder.Price
-
-	if transaction.SellingOrder.PendingShares == 0 {
-		transaction.SellingOrder.Status = "CLOSED"
-	}
-	if transaction.BuyingOrder.PendingShares == 0 {
-		transaction.BuyingOrder.Status = "CLOSED"
-	}
+	transaction.CalculateTotal(transaction.Shares, transaction.BuyingOrder.Price)
+	transaction.CloseBuyOrder()
+	transaction.CloseSellOrder()
 	b.Transactions = append(b.Transactions, transaction)
 }

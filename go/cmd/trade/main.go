@@ -13,7 +13,7 @@ import (
 	ckafka "github.com/confluentinc/confluent-kafka-go/kafka"
 )
 
-func main() { //Thread1
+func main() {
 	ordersIn := make(chan *entity.Order)
 	ordersOut := make(chan *entity.Order)
 	wg := &sync.WaitGroup{}
@@ -25,18 +25,18 @@ func main() { //Thread1
 		"group.id":          "myGroup",
 		"auto.offset.reset": "latest",
 	}
-
 	producer := kafka.NewProducer(configMap)
-	kafka := kafka.NewConsumer(configMap, []string{"input-orders"})
+	kafka := kafka.NewConsumer(configMap, []string{"input"})
 
-	go kafka.Consume(kafkaMsgChan) //Thread2
+	go kafka.Consume(kafkaMsgChan) // Thread2
 
 	book := entity.NewBook(ordersIn, ordersOut, wg)
-	go book.Trade() //Thread3
+	go book.Trade() // Thread3
 
-	go func() { //Thread4
+	go func() {
 		for msg := range kafkaMsgChan {
 			wg.Add(1)
+			fmt.Println(string(msg.Value))
 			tradeInput := dto.TradeInput{}
 			err := json.Unmarshal(msg.Value, &tradeInput)
 			if err != nil {
@@ -49,11 +49,11 @@ func main() { //Thread1
 
 	for res := range ordersOut {
 		output := transformer.TransformOutput(res)
-		outputJson, err := json.Marshal(output)
+		outputJson, err := json.MarshalIndent(output, "", "  ")
+		fmt.Println(string(outputJson))
 		if err != nil {
 			fmt.Println(err)
 		}
 		producer.Publish(outputJson, []byte("orders"), "output")
 	}
-
 }

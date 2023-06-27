@@ -29,43 +29,59 @@ func NewBook(orderChan chan *Order, orderChanOut chan *Order, wg *sync.WaitGroup
 
 func (b *Book) Trade() {
 	for order := range b.OrdersChan {
-		asset := order.Asset.ID
+		b.Wg.Add(1)
+		go func(o *Order) {
+			defer b.Wg.Done()
+			b.processOrder(o)
+		}(order)
+	}
+	b.Wg.Wait()
+}
 
-		buyOrders := b.getOrCreateBuyOrderQueue(asset)
-		sellOrders := b.getOrCreateSellOrderQueue(asset)
+func (b *Book) processOrder(order *Order) {
+	asset := order.Asset.ID
 
-		switch order.OrderType {
-		case "BUY":
-			buyOrders.Push(order)
-			if sellOrders.Len() > 0 && sellOrders.Orders[0].Price <= order.Price {
-				sellOrder := sellOrders.Pop().(*Order)
-				if sellOrder.PendingShares > 0 {
-					transaction := NewTransaction(sellOrder, order, order.Shares, sellOrder.Price)
-					b.AddTransaction(transaction)
-					sellOrder.Transactions = append(sellOrder.Transactions, transaction)
-					order.Transactions = append(order.Transactions, transaction)
-					b.OrdersChanOut <- sellOrder
-					b.OrdersChanOut <- order
-					if sellOrder.PendingShares > 0 {
-						sellOrders.Push(sellOrder)
-					}
-				}
+	buyOrders := b.getOrCreateBuyOrderQueue(asset)
+	sellOrders := b.getOrCreateSellOrderQueue(asset)
+
+	if order.OrderType == "BUY" {
+		buyOrders.Push(order)
+		go b.checkSellOrders(asset, buyOrders, sellOrders, order)
+	} else if order.OrderType == "SELL" {
+		sellOrders.Push(order)
+		go b.checkBuyOrders(asset, buyOrders, sellOrders, order)
+	}
+}
+
+func (b *Book) checkSellOrders(asset string, buyOrders, sellOrders *OrderQueue, buyOrder *Order) {
+	if sellOrders.Len() > 0 && sellOrders.Orders[0].Price <= buyOrder.Price {
+		sellOrder := sellOrders.Pop().(*Order)
+		if sellOrder.PendingShares > 0 {
+			transaction := NewTransaction(sellOrder, buyOrder, buyOrder.Shares, sellOrder.Price)
+			b.AddTransaction(transaction)
+			sellOrder.Transactions = append(sellOrder.Transactions, transaction)
+			buyOrder.Transactions = append(buyOrder.Transactions, transaction)
+			b.OrdersChanOut <- sellOrder
+			b.OrdersChanOut <- buyOrder
+			if sellOrder.PendingShares > 0 {
+				sellOrders.Push(sellOrder)
 			}
-		case "SELL":
-			sellOrders.Push(order)
-			if buyOrders.Len() > 0 && buyOrders.Orders[0].Price >= order.Price {
-				buyOrder := buyOrders.Pop().(*Order)
-				if buyOrder.PendingShares > 0 {
-					transaction := NewTransaction(order, buyOrder, order.Shares, buyOrder.Price)
-					b.AddTransaction(transaction)
-					buyOrder.Transactions = append(buyOrder.Transactions, transaction)
-					order.Transactions = append(order.Transactions, transaction)
-					b.OrdersChanOut <- buyOrder
-					b.OrdersChanOut <- order
-					if buyOrder.PendingShares > 0 {
-						buyOrders.Push(buyOrder)
-					}
-				}
+		}
+	}
+}
+
+func (b *Book) checkBuyOrders(asset string, buyOrders, sellOrders *OrderQueue, sellOrder *Order) {
+	if buyOrders.Len() > 0 && buyOrders.Orders[0].Price >= sellOrder.Price {
+		buyOrder := buyOrders.Pop().(*Order)
+		if buyOrder.PendingShares > 0 {
+			transaction := NewTransaction(sellOrder, buyOrder, sellOrder.Shares, buyOrder.Price)
+			b.AddTransaction(transaction)
+			sellOrder.Transactions = append(sellOrder.Transactions, transaction)
+			buyOrder.Transactions = append(buyOrder.Transactions, transaction)
+			b.OrdersChanOut <- sellOrder
+			b.OrdersChanOut <- buyOrder
+			if buyOrder.PendingShares > 0 {
+				buyOrders.Push(buyOrder)
 			}
 		}
 	}
@@ -88,9 +104,10 @@ func (b *Book) AddTransaction(transaction *Transaction) {
 	transaction.BuyingOrder.Investor.UpdateAssetPosition(transaction.BuyingOrder.Asset.ID, minShares)
 	transaction.AddBuyOrderPendingShares(-minShares)
 
-	transaction.CalculateTotal(transaction.Shares, transaction.BuyingOrder.Price)
+	transaction.CalculateTotal(minShares, transaction.BuyingOrder.Price)
 	transaction.CloseBuyOrder()
 	transaction.CloseSellOrder()
+
 	b.Transactions = append(b.Transactions, transaction)
 }
 

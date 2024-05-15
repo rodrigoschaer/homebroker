@@ -20,7 +20,7 @@ func NewBook(orderChan chan *Order, orderChanOut chan *Order, wg *sync.WaitGroup
 		Orders:          []*Order{},
 		Transactions:    []*Transaction{},
 		OrdersChan:      orderChan,
-		OrdersChanOut:   orderChanOut,
+		,OrdersChanOut:   orderChanOut,
 		Wg:              wg,
 		BuyOrderQueues:  make(map[string]*OrderQueue),
 		SellOrderQueues: make(map[string]*OrderQueue),
